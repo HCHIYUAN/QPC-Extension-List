@@ -56,7 +56,7 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
-        const APP_VERSION = "v1.8 (Grid Layout)";
+        const APP_VERSION = "v1.9 (Smart Clean & Reset)";
 
         // --- Firebase 設定 ---
         const firebaseConfig = {
@@ -97,8 +97,9 @@
             HelpCircle: (props) => <IconBase {...props}><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></IconBase>,
             CloudUpload: (props) => <IconBase {...props}><path d="M21.21 15.89A10 10 0 1 1 8 2.83"></path><path d="M22 12A10 10 0 0 0 12 2v10z"></path></IconBase>,
             Broom: (props) => <IconBase {...props}><path d="M18 20a4.5 4.5 0 0 0 4.5-4.5V3h-3v12.5a1.5 1.5 0 0 1-1.5 1.5H5.5A1.5 1.5 0 0 1 4 15.5V3H1v12.5A4.5 4.5 0 0 0 5.5 20h12.5z"></path><line x1="10" y1="3" x2="10" y2="10"></line><line x1="14" y1="3" x2="14" y2="10"></line></IconBase>,
+            Trash: (props) => <IconBase {...props}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></IconBase>,
         };
-        const { Search, Phone, User, Building, Plus, Upload, Trash2, Edit2, Save, X, Download, Settings, ChevronUp, RotateCcw, HelpCircle, CloudUpload, Broom } = Icons;
+        const { Search, Phone, User, Building, Plus, Upload, Trash2, Edit2, Save, X, Download, Settings, ChevronUp, RotateCcw, HelpCircle, CloudUpload, Broom, Trash } = Icons;
 
         // --- 預設資料 (完整版) ---
         const DEFAULT_DATA = [
@@ -273,7 +274,7 @@
                 return { contacts: newContacts, mode };
             };
 
-            // 批次上傳資料到 Firebase (加入防重複機制)
+            // 批次上傳資料到 Firebase
             const batchUploadToFirebase = async (dataToUpload) => {
                 if (!user) {
                     alert("尚未連線到資料庫，請稍後再試");
@@ -288,15 +289,14 @@
                     let skippedCount = 0;
                     const BATCH_SIZE = 450; 
 
-                    // 1. 建立現有資料的「指紋」清單，用來比對重複
-                    // 指紋格式：部門-姓名-分機 (去除空白)
+                    // 1. 建立現有資料的「指紋」清單 (寬鬆比對：姓名 + 分機，去除空白與大小寫)
                     const existingSignatures = new Set(
-                        contacts.map(c => `${c.unit || ''}-${c.name}-${c.ext}`.replace(/\s/g, ''))
+                        contacts.map(c => `${c.name}-${c.ext}`.replace(/\s/g, '').toLowerCase())
                     );
 
                     for (const contact of dataToUpload) {
                         // 2. 產生待上傳資料的指紋
-                        const signature = `${contact.unit || ''}-${contact.name}-${contact.ext}`.replace(/\s/g, '');
+                        const signature = `${contact.name}-${contact.ext}`.replace(/\s/g, '').toLowerCase();
                         
                         // 3. 檢查是否重複
                         if (existingSignatures.has(signature)) {
@@ -310,6 +310,9 @@
                         batch.set(newRef, data);
                         addedCount++;
                         
+                        // 更新本地指紋庫，防止同一次匯入中的重複
+                        existingSignatures.add(signature);
+
                         if (addedCount >= BATCH_SIZE) break; 
                     }
 
@@ -329,15 +332,14 @@
                 }
             };
 
-            // 清除資料庫中的重複項 (新功能)
+            // 清除資料庫中的重複項 (強力版)
             const cleanDuplicates = async () => {
                 if (!user) return;
-                if (!window.confirm("確定要清除資料庫中的重複項目嗎？\n(部門、姓名、分機完全相同的資料，將只保留一筆)")) return;
+                if (!window.confirm("確定要執行「強力去重」嗎？\n\n系統將掃描整個資料庫，若發現「姓名+分機」相同，將只保留一筆，其餘刪除。\n(會忽略部門名稱的差異)")) return;
 
                 setIsUploading(true);
                 try {
-                    // 取得所有資料 (使用當前 contacts 狀態即可，因為已同步)
-                    // 為了保險，我們直接用 contacts，避免再次讀取
+                    // 取得所有資料
                     const snapshot = await db.collection(COLLECTION_NAME).get();
                     const allDocs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
@@ -347,7 +349,10 @@
                     const BATCH_SIZE = 450; 
 
                     for (const doc of allDocs) {
-                        const signature = `${doc.unit || ''}-${doc.name}-${doc.ext}`.replace(/\s/g, '');
+                        // 指紋：姓名+分機 (去除空白、轉小寫、去除 .0)
+                        const cleanName = String(doc.name || '').replace(/\s/g, '').toLowerCase();
+                        const cleanExt = String(doc.ext || '').replace(/\.0$/, '').replace(/\s/g, '');
+                        const signature = `${cleanName}-${cleanExt}`;
                         
                         if (seenSignatures.has(signature)) {
                             // 已經看過這個指紋 -> 重複 -> 標記刪除
@@ -355,10 +360,7 @@
                             batch.delete(ref);
                             deleteCount++;
                             
-                            if (deleteCount >= BATCH_SIZE) {
-                                // 簡單處理：一次最多刪 450 筆，若超過需多次 commit (通常不會這麼多)
-                                break; 
-                            }
+                            if (deleteCount >= BATCH_SIZE) break; 
                         } else {
                             // 沒看過 -> 加入清單 (保留第一筆)
                             seenSignatures.add(signature);
@@ -375,6 +377,45 @@
                 } catch (error) {
                     console.error("Clean error:", error);
                     alert("清理失敗：" + error.message);
+                } finally {
+                    setIsUploading(false);
+                }
+            };
+
+            // 清空所有資料 (核彈級)
+            const deleteAllData = async () => {
+                if (!user) return;
+                if (!window.confirm("⚠️ 警告：這將會「永久刪除」資料庫中的所有聯絡人資料！\n\n您確定要清空嗎？")) return;
+                // 二次確認
+                const confirm2 = prompt("請輸入 'DELETE' (大寫) 以確認刪除所有資料：");
+                if (confirm2 !== 'DELETE') return;
+
+                setIsUploading(true);
+                try {
+                    const snapshot = await db.collection(COLLECTION_NAME).get();
+                    if (snapshot.empty) {
+                        alert("資料庫已經是空的了。");
+                        setIsUploading(false);
+                        return;
+                    }
+
+                    const batch = db.batch();
+                    let count = 0;
+                    const BATCH_SIZE = 450;
+
+                    snapshot.docs.forEach((doc) => {
+                        if (count < BATCH_SIZE) {
+                            batch.delete(doc.ref);
+                            count++;
+                        }
+                    });
+
+                    await batch.commit();
+                    alert(`已清空 ${count} 筆資料。\n(若資料量超過 450 筆，請再次執行此功能以刪除剩餘資料)`);
+
+                } catch (error) {
+                    console.error("Delete all error:", error);
+                    alert("清空失敗：" + error.message);
                 } finally {
                     setIsUploading(false);
                 }
@@ -494,7 +535,13 @@
                                 {/* 新增：清除重複資料按鈕 */}
                                 <button onClick={cleanDuplicates} className="flex items-center gap-2 px-4 py-2 bg-orange-50 text-orange-700 border border-orange-200 rounded-lg hover:bg-orange-100 text-sm transition shadow-sm" disabled={isUploading} title="清除資料庫中已存在的重複資料">
                                     <Broom className="w-4 h-4" />
-                                    清除資料庫重複項
+                                    強力清除重複
+                                </button>
+
+                                {/* 新增：清空資料按鈕 */}
+                                <button onClick={deleteAllData} className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100 text-sm transition shadow-sm" disabled={isUploading} title="刪除所有資料，慎用！">
+                                    <Trash className="w-4 h-4" />
+                                    清空所有資料
                                 </button>
 
                                 <button onClick={handleInitDefaultData} className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100 text-sm transition shadow-sm" disabled={isUploading}><CloudUpload className="w-4 h-4" /> 上傳預設資料</button>
@@ -523,12 +570,12 @@
                             </div>
                         )}
                         {allUnits.length > 0 && (
-                        <div className="mb-6 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
-                            <div className="flex space-x-2">
-                            <button onClick={() => setSelectedUnit(null)} className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-colors border ${!selectedUnit ? 'bg-slate-800 text-white border-slate-800 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}>全部</button>
+                        <div className="mb-6">
+                            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                            <button onClick={() => setSelectedUnit(null)} className={`px-2 py-3 rounded-lg text-sm font-medium transition-colors border text-center ${!selectedUnit ? 'bg-slate-800 text-white border-slate-800 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}>全部</button>
                             {allUnits.map(unit => {
                                 const isSelected = selectedUnit === unit;
-                                return ( <button key={unit} onClick={() => setSelectedUnit(unit)} className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-colors border ${isSelected ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200'}`}>{unit}</button> );
+                                return ( <button key={unit} onClick={() => setSelectedUnit(unit)} className={`px-2 py-3 rounded-lg text-sm font-medium transition-colors border text-center truncate ${isSelected ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200'}`} title={unit}>{unit}</button> );
                             })}
                             </div>
                         </div>
@@ -565,6 +612,25 @@
                     </main>
 
                     {isModalOpen && <ContactModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSave} initialData={editingContact} existingUnits={allUnits} />}
+                </div>
+            );
+        };
+
+        const ContactModal = ({ isOpen, onClose, onSave, initialData, existingUnits = [] }) => {
+            const [formData, setFormData] = useState({ unit: '', ext: '', name: '', note: '' });
+            useEffect(() => { if (initialData) { setFormData(initialData); } else { setFormData({ unit: '', ext: '', name: '', note: '' }); } }, [initialData]);
+            const handleSubmit = (e) => { e.preventDefault(); onSave({ ...formData, id: initialData?.id }); };
+            return (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+                        <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50"><h3 className="font-bold text-lg text-slate-800">{initialData ? '編輯聯絡人' : '新增聯絡人'}</h3><button onClick={onClose} type="button" className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button></div>
+                        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                        <div><label className="block text-sm font-medium text-slate-700 mb-1">部門 / 單位</label><div className="relative"><div className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"><Building className="w-4 h-4" /></div><input required type="text" list="units-datalist" className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" placeholder="例如：資訊室" value={formData.unit} onChange={e => setFormData({...formData, unit: e.target.value})} /><datalist id="units-datalist">{existingUnits.map(u => <option key={u} value={u} />)}</datalist></div></div>
+                        <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-medium text-slate-700 mb-1">使用人姓名</label><div className="relative"><div className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"><User className="w-4 h-4" /></div><input required type="text" className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" placeholder="姓名" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div></div><div><label className="block text-sm font-medium text-slate-700 mb-1">分機號碼</label><div className="relative"><div className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"><Phone className="w-4 h-4" /></div><input required type="text" className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" placeholder="例如：300" value={formData.ext} onChange={e => setFormData({...formData, ext: e.target.value})} /></div></div></div>
+                        <div><label className="block text-sm font-medium text-slate-700 mb-1">備註 (選填)</label><textarea className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" rows="2" placeholder="例如：手機號碼、職務代理人..." value={formData.note} onChange={e => setFormData({...formData, note: e.target.value})}></textarea></div>
+                        <div className="pt-4 flex justify-end gap-3"><button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition">取消</button><button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-md hover:shadow-lg transition flex items-center gap-2"><Save className="w-4 h-4" /> 儲存</button></div>
+                        </form>
+                    </div>
                 </div>
             );
         };
