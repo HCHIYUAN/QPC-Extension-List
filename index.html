@@ -12,7 +12,7 @@
     
     <title>公司分機表</title>
     
-    <!-- 設定 App 圖示 (Favicon) - 加上 ?v=2 強制更新 -->
+    <!-- 設定 App 圖示 -->
     <link rel="icon" href="icon.png?v=2" type="image/png" />
     <link rel="apple-touch-icon" href="icon.png?v=2" />
     
@@ -56,7 +56,7 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
-        const APP_VERSION = "v1.5 (Log Fixed)";
+        const APP_VERSION = "v1.6 (Anti-Duplicate)";
 
         // --- Firebase 設定 ---
         const firebaseConfig = {
@@ -246,7 +246,6 @@
                 return units.sort();
             }, [contacts]);
 
-            // ... (解析 CSV, 批次上傳, CRUD 函數與之前相同，此處省略以節省篇幅) ...
             const parseCSV = (text) => {
                 const lines = text.split('\n');
                 const newContacts = [];
@@ -272,19 +271,63 @@
                 });
                 return { contacts: newContacts, mode };
             };
+
+            // 批次上傳資料到 Firebase (加入防重複機制)
             const batchUploadToFirebase = async (dataToUpload) => {
-                if (!user) { alert("尚未連線到資料庫，請稍後再試"); return; }
+                if (!user) {
+                    alert("尚未連線到資料庫，請稍後再試");
+                    return;
+                }
                 if (dataToUpload.length === 0) return;
+                
                 setIsUploading(true);
                 try {
-                    const batch = db.batch(); let count = 0; const BATCH_SIZE = 450; 
+                    const batch = db.batch();
+                    let addedCount = 0;
+                    let skippedCount = 0;
+                    const BATCH_SIZE = 450; 
+
+                    // 1. 建立現有資料的「指紋」清單，用來比對重複
+                    // 指紋格式：部門-姓名-分機 (去除空白)
+                    const existingSignatures = new Set(
+                        contacts.map(c => `${c.unit || ''}-${c.name}-${c.ext}`.replace(/\s/g, ''))
+                    );
+
                     for (const contact of dataToUpload) {
-                        const newRef = db.collection(COLLECTION_NAME).doc(); const { id, ...data } = contact; batch.set(newRef, data); count++;
-                        if (count >= BATCH_SIZE) break; 
+                        // 2. 產生待上傳資料的指紋
+                        const signature = `${contact.unit || ''}-${contact.name}-${contact.ext}`.replace(/\s/g, '');
+                        
+                        // 3. 檢查是否重複
+                        if (existingSignatures.has(signature)) {
+                            skippedCount++;
+                            continue; // 跳過此筆
+                        }
+
+                        // 4. 若無重複則加入寫入排程
+                        const newRef = db.collection(COLLECTION_NAME).doc();
+                        const { id, ...data } = contact; 
+                        batch.set(newRef, data);
+                        addedCount++;
+                        
+                        if (addedCount >= BATCH_SIZE) break; 
                     }
-                    await batch.commit(); alert(`成功上傳 ${count} 筆資料到雲端資料庫！`);
-                } catch (error) { console.error("Upload error:", error); alert("上傳失敗：" + error.message); } finally { setIsUploading(false); }
+
+                    // 5. 執行寫入
+                    if (addedCount > 0) {
+                        await batch.commit();
+                        alert(`處理完成！\n✅ 成功新增：${addedCount} 筆\n⚠️ 自動略過：${skippedCount} 筆重複資料`);
+                    } else {
+                        alert(`未新增任何資料。\n(所有 ${skippedCount} 筆資料皆已存在於資料庫中)`);
+                    }
+                    
+                } catch (error) {
+                    console.error("Upload error:", error);
+                    alert("上傳失敗：" + error.message);
+                } finally {
+                    setIsUploading(false);
+                }
             };
+
             const handleFileUpload = (event) => {
                 const file = event.target.files[0]; if (!file) return;
                 const reader = new FileReader(); reader.readAsText(file, encoding);
@@ -329,7 +372,6 @@
                                             alt="Logo" 
                                             className="w-8 h-8 object-contain rounded-lg bg-white/10 p-0.5" 
                                             onError={() => {
-                                                // 移除會造成 circular object error 的 console.error(e)
                                                 setImageError(true);
                                             }}
                                         />
