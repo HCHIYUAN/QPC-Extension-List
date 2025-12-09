@@ -2,56 +2,78 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="description" content="公司分機通訊錄查詢系統">
     <title>公司分機表</title>
     
-    <!-- 1. 載入 Tailwind CSS (樣式庫) -->
+    <!-- 設定 App 圖示 -->
+    <link rel="icon" href="icon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="icon.png" />
+    
+    <!-- 1. 載入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     
     <!-- 2. 載入 React 和 ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     
-    <!-- 3. 載入 Babel (讓瀏覽器看懂 React 程式碼) -->
+    <!-- 3. 載入 Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+    <!-- 4. 載入 Firebase (增加 Auth 模組以解決權限問題) -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
     <style>
-        /* 隱藏滾動條但保留功能 */
-        .scrollbar-hide::-webkit-scrollbar {
-            display: none;
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        body { background-color: #f8fafc; -webkit-tap-highlight-color: transparent; }
+        /* 讀取中的動畫 */
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #3498db;
+            width: 20px;
+            height: 20px;
+            -webkit-animation: spin 1s linear infinite; /* Safari */
+            animation: spin 1s linear infinite;
         }
-        .scrollbar-hide {
-            -ms-overflow-style: none;
-            scrollbar-width: none;
-        }
-        body {
-            background-color: #f8fafc; /* bg-slate-50 */
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
-    <!-- 4. 主程式碼 -->
+    <!-- 5. 主程式碼 -->
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
-        // --- 圖示組件定義 (SVG Icons) ---
-        // 為了單檔運作，我們直接定義 SVG，不依賴外部圖示庫檔案
-        const IconBase = ({ children, className, ...props }) => (
-            <svg 
-                xmlns="http://www.w3.org/2000/svg" 
-                width="24" height="24" viewBox="0 0 24 24" 
-                fill="none" stroke="currentColor" strokeWidth="2" 
-                strokeLinecap="round" strokeLinejoin="round" 
-                className={className} 
-                {...props}
-            >
-                {children}
-            </svg>
-        );
+        // --- Firebase 設定 ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyC-x0z9zteIwGoYgjk4iRMw1cCCkkSFPYI",
+            authDomain: "qpc-extension-list.firebaseapp.com",
+            projectId: "qpc-extension-list",
+            storageBucket: "qpc-extension-list.firebasestorage.app",
+            messagingSenderId: "828295398804",
+            appId: "1:828295398804:web:8523c24def546ef48bbb81"
+        };
 
+        // 初始化 Firebase
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const db = firebase.firestore();
+        const auth = firebase.auth(); // 啟用 Auth
+        const COLLECTION_NAME = "contacts"; 
+
+        // --- 圖示組件 ---
+        const IconBase = ({ children, className, ...props }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>{children}</svg>
+        );
         const Icons = {
             Search: (props) => <IconBase {...props}><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></IconBase>,
             Phone: (props) => <IconBase {...props}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></IconBase>,
@@ -67,11 +89,12 @@
             Settings: (props) => <IconBase {...props}><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></IconBase>,
             ChevronUp: (props) => <IconBase {...props}><polyline points="18 15 12 9 6 15"></polyline></IconBase>,
             RotateCcw: (props) => <IconBase {...props}><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></IconBase>,
-            HelpCircle: (props) => <IconBase {...props}><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></IconBase>
+            HelpCircle: (props) => <IconBase {...props}><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></IconBase>,
+            CloudUpload: (props) => <IconBase {...props}><path d="M21.21 15.89A10 10 0 1 1 8 2.83"></path><path d="M22 12A10 10 0 0 0 12 2v10z"></path></IconBase>,
         };
-        const { Search, Phone, User, Building, Plus, Upload, Trash2, Edit2, Save, X, Download, Settings, ChevronUp, RotateCcw, HelpCircle } = Icons;
+        const { Search, Phone, User, Building, Plus, Upload, Trash2, Edit2, Save, X, Download, Settings, ChevronUp, RotateCcw, HelpCircle, CloudUpload } = Icons;
 
-        // --- 預設資料 (已整合 20251209 PDF 內容) ---
+        // --- 預設資料 (完整版) ---
         const DEFAULT_DATA = [
             // 業本部
             { id: '300', unit: '業本部', ext: '300', name: '董事長', note: '' },
@@ -154,21 +177,71 @@
             const [encoding, setEncoding] = useState('big5');
             const [showFormatHint, setShowFormatHint] = useState(false);
             const [isManageMode, setIsManageMode] = useState(false); 
+            const [imageError, setImageError] = useState(false);
+            const [isLoading, setIsLoading] = useState(true);
+            const [isUploading, setIsUploading] = useState(false);
             
+            // 使用者登入狀態 (解決權限問題)
+            const [user, setUser] = useState(null);
+
+            // 初始化 Auth：匿名登入以解決 "Missing permissions"
             useEffect(() => {
-                const savedData = localStorage.getItem('companyContacts');
-                if (savedData) {
-                    setContacts(JSON.parse(savedData));
-                } else {
-                    setContacts(DEFAULT_DATA);
-                }
+                const unsubscribe = auth.onAuthStateChanged((u) => {
+                    if (u) {
+                        // 已經登入
+                        console.log("User signed in:", u.uid);
+                        setUser(u);
+                    } else {
+                        // 尚未登入，嘗試匿名登入
+                        console.log("No user, attempting anonymous sign in...");
+                        auth.signInAnonymously().catch((error) => {
+                            console.error("Anonymous auth failed:", error);
+                            let errorMsg = `連線失敗: ${error.message}`;
+                            // 判斷錯誤代碼，提供更明確的指示
+                            if (error.code === 'auth/configuration-not-found') {
+                                errorMsg = "Firebase Authentication 尚未啟用。\n\n請前往 Firebase Console -> Authentication 頁面，點擊「開始使用 (Get Started)」，並確認已開啟「匿名 (Anonymous)」登入。";
+                            } else if (error.code === 'auth/operation-not-allowed') {
+                                errorMsg = "匿名登入未開啟。\n\n請前往 Firebase Console -> Authentication -> Sign-in method，開啟「匿名 (Anonymous)」。";
+                            }
+                            alert(errorMsg);
+                        });
+                    }
+                });
+                return () => unsubscribe();
             }, []);
 
+            // 使用 Firestore 監聽資料 (需等待 user 登入後才執行)
             useEffect(() => {
-                if (contacts.length > 0) {
-                    localStorage.setItem('companyContacts', JSON.stringify(contacts));
+                if (!user) {
+                    // 若尚未登入，不執行監聽，避免權限錯誤
+                    return;
                 }
-            }, [contacts]);
+
+                setIsLoading(true);
+                const unsubscribe = db.collection(COLLECTION_NAME).orderBy('unit').onSnapshot((snapshot) => {
+                    const data = snapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
+                    
+                    data.sort((a, b) => {
+                        if (a.unit !== b.unit) return a.unit.localeCompare(b.unit, 'zh-TW');
+                        return a.ext.localeCompare(b.ext);
+                    });
+
+                    setContacts(data);
+                    setIsLoading(false);
+                }, (error) => {
+                    console.error("Firebase Snapshot error:", error);
+                    setIsLoading(false);
+                    // 只有在非權限錯誤時才顯示，避免登入瞬間的短暫錯誤干擾
+                    if (error.code !== 'permission-denied') {
+                        alert("資料讀取錯誤: " + error.message);
+                    }
+                });
+
+                return () => unsubscribe();
+            }, [user]); // 依賴 user，當 user 登入成功後才會觸發
 
             const allUnits = useMemo(() => {
                 const units = [...new Set(contacts.map(c => c.unit).filter(u => u && u.trim() !== ''))];
@@ -204,7 +277,6 @@
                             if (unit && ext && nameRaw && unit !== '單位' && ext !== '分機') {
                                 ext = ext.replace('.0', '');
                                 newContacts.push({
-                                    id: Date.now() + Math.random().toString(36).substr(2, 9) + i,
                                     unit: unit,
                                     ext: ext,
                                     name: nameRaw,
@@ -230,7 +302,6 @@
                             if (['部門', '單位', 'Unit'].includes(col0) || ['分機'].includes(ext)) return;
 
                             newContacts.push({
-                                id: Date.now() + Math.random().toString(36).substr(2, 9) + index,
                                 unit: col0,
                                 name: name,
                                 ext: ext.replace('.0', ''),
@@ -241,6 +312,37 @@
                 });
 
                 return { contacts: newContacts, mode };
+            };
+
+            // 批次上傳資料到 Firebase
+            const batchUploadToFirebase = async (dataToUpload) => {
+                if (!user) {
+                    alert("尚未連線到資料庫，請稍後再試");
+                    return;
+                }
+                if (dataToUpload.length === 0) return;
+                setIsUploading(true);
+                try {
+                    const batch = db.batch();
+                    let count = 0;
+                    const BATCH_SIZE = 450; 
+
+                    for (const contact of dataToUpload) {
+                        const newRef = db.collection(COLLECTION_NAME).doc();
+                        const { id, ...data } = contact; 
+                        batch.set(newRef, data);
+                        count++;
+                        
+                        if (count >= BATCH_SIZE) break; 
+                    }
+                    await batch.commit();
+                    alert(`成功上傳 ${count} 筆資料到雲端資料庫！`);
+                } catch (error) {
+                    console.error("Upload error:", error);
+                    alert("上傳失敗：" + error.message);
+                } finally {
+                    setIsUploading(false);
+                }
             };
 
             const handleFileUpload = (event) => {
@@ -258,13 +360,11 @@
                     const { contacts: newContacts, mode } = parseCSV(text);
                     if (newContacts.length > 0) {
                         const msg = mode === 'legacy' 
-                        ? `偵測到「舊版排版格式」，成功解析 ${newContacts.length} 筆資料。`
-                        : `偵測到「標準清單格式」，成功解析 ${newContacts.length} 筆資料。`;
+                        ? `偵測到「舊版排版格式」，解析出 ${newContacts.length} 筆資料。`
+                        : `偵測到「標準清單格式」，解析出 ${newContacts.length} 筆資料。`;
 
-                        if (window.confirm(`${msg}\n是否要覆蓋現有資料？(選擇「取消」則會加入到現有資料後)`)) {
-                        setContacts(newContacts);
-                        } else {
-                        setContacts(prev => [...prev, ...newContacts]);
+                        if (window.confirm(`${msg}\n確定要將這些資料「新增」到雲端資料庫嗎？`)) {
+                            batchUploadToFirebase(newContacts);
                         }
                         setSelectedUnit(null);
                     } else {
@@ -286,20 +386,32 @@
                 });
             }, [contacts, searchTerm, selectedUnit]);
 
-            const handleDelete = (id) => {
-                if (window.confirm('確定要刪除此聯絡人嗎？')) {
-                    setContacts(contacts.filter(c => c.id !== id));
+            const handleDelete = async (id) => {
+                if (window.confirm('確定要刪除此聯絡人嗎？(此操作會同步刪除雲端資料)')) {
+                    try {
+                        await db.collection(COLLECTION_NAME).doc(id).delete();
+                    } catch (err) {
+                        alert("刪除失敗：" + err.message);
+                    }
                 }
             };
 
-            const handleSave = (contact) => {
-                if (editingContact) {
-                    setContacts(contacts.map(c => c.id === contact.id ? contact : c));
-                } else {
-                    setContacts([...contacts, { ...contact, id: Date.now().toString() }]);
+            const handleSave = async (contact) => {
+                try {
+                    if (contact.id) {
+                        // Update
+                        const { id, ...data } = contact;
+                        await db.collection(COLLECTION_NAME).doc(id).set(data, { merge: true });
+                    } else {
+                        // Create
+                        const { id, ...data } = contact; // remove temp id
+                        await db.collection(COLLECTION_NAME).add(data);
+                    }
+                    setIsModalOpen(false);
+                    setEditingContact(null);
+                } catch (err) {
+                    alert("儲存失敗：" + err.message);
                 }
-                setIsModalOpen(false);
-                setEditingContact(null);
             };
 
             const openAddModal = () => {
@@ -312,6 +424,13 @@
                 setIsModalOpen(true);
             };
 
+            // 初始化預設資料到 Firebase
+            const handleInitDefaultData = () => {
+                if (window.confirm("這將會把內建的預設資料(PDF內容)全部上傳到 Firebase。\n如果資料庫已經有資料，可能會造成重複。\n確定要執行嗎？")) {
+                    batchUploadToFirebase(DEFAULT_DATA);
+                }
+            };
+
             const exportCSV = () => {
                 const header = "部門,姓名,分機,備註\n";
                 const rows = contacts.map(c => `${c.unit},${c.name},${c.ext},${c.note || ''}`).join("\n");
@@ -319,7 +438,7 @@
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement('a');
                 link.href = url;
-                link.setAttribute('download', '公司通訊錄_標準格式.csv');
+                link.setAttribute('download', '公司通訊錄_雲端備份.csv');
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
@@ -330,21 +449,34 @@
                     <header className="bg-blue-600 text-white shadow-md sticky top-0 z-20">
                         <div className="max-w-6xl mx-auto px-4 py-3">
                             <div className="flex justify-between items-center mb-3">
+                                {/* Logo 區域 */}
                                 <h1 
-                                    className="text-xl font-bold flex items-center gap-2 cursor-pointer hover:opacity-90 transition" 
+                                    className="text-xl font-bold flex items-center gap-3 cursor-pointer hover:opacity-90 transition" 
                                     onClick={() => {setSelectedUnit(null); setSearchTerm('')}}
                                 >
-                                    <Phone className="w-5 h-5" />
-                                    公司分機表
+                                    {!imageError ? (
+                                        <img 
+                                            src="icon.png" 
+                                            alt="Logo" 
+                                            className="w-8 h-8 object-contain rounded-lg bg-white/10 p-0.5" 
+                                            onError={() => setImageError(true)}
+                                        />
+                                    ) : (
+                                        <Phone className="w-6 h-6" />
+                                    )}
+                                    <span>公司分機表</span>
                                 </h1>
                                 
-                                <button 
-                                    onClick={() => setIsManageMode(!isManageMode)}
-                                    className={`p-2 rounded-lg transition text-blue-100 hover:bg-blue-500 hover:text-white ${isManageMode ? 'bg-blue-700 text-white' : ''}`}
-                                    title="管理資料"
-                                >
-                                    {isManageMode ? <ChevronUp className="w-5 h-5" /> : <Settings className="w-5 h-5" />}
-                                </button>
+                                <div className="flex items-center gap-2">
+                                    {isLoading && <div className="loader mr-2"></div>}
+                                    <button 
+                                        onClick={() => setIsManageMode(!isManageMode)}
+                                        className={`p-2 rounded-lg transition text-blue-100 hover:bg-blue-500 hover:text-white ${isManageMode ? 'bg-blue-700 text-white' : ''}`}
+                                        title="管理資料"
+                                    >
+                                        {isManageMode ? <ChevronUp className="w-5 h-5" /> : <Settings className="w-5 h-5" />}
+                                    </button>
+                                </div>
                             </div>
 
                             <div className="relative w-full">
@@ -373,37 +505,46 @@
                     <div className={`bg-white border-b border-slate-200 overflow-hidden transition-all duration-300 ease-in-out ${isManageMode ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}`}>
                         <div className="max-w-6xl mx-auto px-4 py-4 space-y-4">
                             <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-                                <Settings className="w-4 h-4" /> 資料管理
+                                <Settings className="w-4 h-4" /> 資料管理 (Firebase 雲端版)
                             </h3>
                             <div className="flex flex-wrap gap-3 items-center">
                                 <button onClick={openAddModal} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm transition shadow-sm">
                                     <Plus className="w-4 h-4" />
-                                    新增聯絡人
+                                    新增
                                 </button>
-
+                                
                                 <div className="h-6 w-px bg-slate-300 mx-1 hidden sm:block"></div>
+                                
+                                {/* 批次匯入 */}
+                                <label className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-slate-600 text-sm transition shadow-sm">
+                                    {isUploading ? <div className="loader w-4 h-4 border-slate-400"></div> : <Upload className="w-4 h-4" />}
+                                    <span>{isUploading ? "上傳中..." : "匯入 CSV"}</span>
+                                    <input key={encoding} type="file" accept=".csv,.txt" className="hidden" onChange={handleFileUpload} disabled={isUploading} />
+                                </label>
 
                                 <div className="flex items-center bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 shadow-sm">
-                                    <span className="text-xs text-slate-500 mr-2">編碼:</span>
+                                    <span className="text-xs text-slate-500 mr-2">CSV編碼:</span>
                                     <select 
                                         value={encoding} 
                                         onChange={(e) => setEncoding(e.target.value)}
                                         className="text-sm bg-transparent border-none focus:ring-0 text-slate-700 cursor-pointer outline-none p-0"
                                     >
-                                        <option value="big5">Big5 (Excel預設)</option>
-                                        <option value="utf-8">UTF-8 (通用)</option>
+                                        <option value="big5">Big5 (Excel)</option>
+                                        <option value="utf-8">UTF-8</option>
                                     </select>
                                 </div>
-
-                                <label className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-slate-600 text-sm transition shadow-sm">
-                                    <Upload className="w-4 h-4" />
-                                    <span>匯入 CSV</span>
-                                    <input key={encoding} type="file" accept=".csv,.txt" className="hidden" onChange={handleFileUpload} />
-                                </label>
                                 
                                 <button onClick={exportCSV} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-600 text-sm transition shadow-sm">
                                     <Download className="w-4 h-4" />
-                                    匯出備份
+                                    匯出
+                                </button>
+
+                                <div className="h-6 w-px bg-slate-300 mx-1 hidden sm:block"></div>
+
+                                {/* 初始化按鈕 */}
+                                <button onClick={handleInitDefaultData} className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100 text-sm transition shadow-sm" disabled={isUploading}>
+                                    <CloudUpload className="w-4 h-4" />
+                                    上傳預設資料到雲端
                                 </button>
 
                                 <button onClick={() => setShowFormatHint(!showFormatHint)} className="p-2 text-slate-400 hover:text-blue-600 transition ml-auto">
@@ -413,7 +554,7 @@
                             
                             {showFormatHint && (
                                 <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-slate-700 animate-in fade-in slide-in-from-top-2">
-                                    <p className="mb-2 font-bold text-blue-800">💡 建議欄位順序 (4欄):</p>
+                                    <p className="mb-2 font-bold text-blue-800">💡 建議 CSV 欄位順序 (4欄):</p>
                                     <p className="text-xs text-slate-600">A:部門 | B:姓名 | C:分機 | D:備註</p>
                                 </div>
                             )}
@@ -422,6 +563,23 @@
 
                     <main className="max-w-6xl mx-auto px-4 pt-4">
                         
+                        {/* 載入中畫面 */}
+                        {isLoading && contacts.length === 0 && (
+                            <div className="flex flex-col items-center justify-center py-12">
+                                <div className="loader w-10 h-10 border-blue-500 mb-4"></div>
+                                <p className="text-slate-500 text-sm">正在連線至雲端資料庫...</p>
+                            </div>
+                        )}
+
+                        {!isLoading && contacts.length === 0 && (
+                            <div className="text-center py-12 bg-white rounded-lg border border-dashed border-slate-300">
+                                <p className="text-slate-500 mb-4">資料庫目前是空的</p>
+                                <button onClick={handleInitDefaultData} className="text-blue-600 hover:underline font-bold">
+                                    點此上傳預設資料 (PDF內容)
+                                </button>
+                            </div>
+                        )}
+
                         {allUnits.length > 0 && (
                         <div className="mb-6 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
                             <div className="flex space-x-2">
@@ -521,9 +679,7 @@
                             </div>
                             ))
                         ) : (
-                            <div className="col-span-full py-10 text-center text-slate-400">
-                            <p>查無資料</p>
-                            </div>
+                            !isLoading && <div className="col-span-full py-10 text-center text-slate-400"><p>查無資料</p></div>
                         )}
                         </div>
                     </main>
