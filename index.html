@@ -10,6 +10,11 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     
+    <!-- PWA 設定 -->
+    <link rel="manifest" href="manifest.json" />
+    <meta name="theme-color" content="#2563eb" />
+    <meta name="mobile-web-app-capable" content="yes">
+    
     <title>公司分機表</title>
     
     <!-- 設定 App 圖示 -->
@@ -35,17 +40,25 @@
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
         body { background-color: #f8fafc; -webkit-tap-highlight-color: transparent; }
-        .loader {
-            border: 3px solid #f3f3f3;
-            border-radius: 50%;
-            border-top: 3px solid #3498db;
-            width: 20px;
-            height: 20px;
-            animation: spin 1s linear infinite;
+        
+        /* 骨架屏流光動畫 */
+        @keyframes shimmer {
+            0% { background-position: -1000px 0; }
+            100% { background-position: 1000px 0; }
         }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        .skeleton {
+            animation: shimmer 2s infinite linear;
+            background: linear-gradient(to right, #f1f5f9 4%, #e2e8f0 25%, #f1f5f9 36%);
+            background-size: 1000px 100%;
+        }
+        
+        /* 淡入動畫 */
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
     </style>
 </head>
@@ -56,7 +69,7 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
-        const APP_VERSION = "v2.0 (Smart Update)";
+        const APP_VERSION = "v2.3 (Final Stable)";
 
         // --- Firebase 設定 ---
         const firebaseConfig = {
@@ -74,6 +87,30 @@
         const db = firebase.firestore();
         const auth = firebase.auth();
         const COLLECTION_NAME = "contacts"; 
+
+        // --- 錯誤邊界元件 ---
+        class ErrorBoundary extends React.Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false, error: null };
+            }
+            static getDerivedStateFromError(error) { return { hasError: true, error }; }
+            componentDidCatch(error, errorInfo) { console.error("ErrorBoundary caught error:", error, errorInfo); }
+            render() {
+                if (this.state.hasError) {
+                    return (
+                        <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 text-slate-800">
+                            <div className="bg-white p-6 rounded-xl shadow-lg max-w-sm w-full border-l-4 border-red-500">
+                                <h2 className="text-xl font-bold text-red-600 mb-2">⚠️ 發生錯誤</h2>
+                                <p className="text-sm text-slate-600 mb-4">應用程式發生異常，請重試。</p>
+                                <button onClick={() => window.location.reload()} className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium">重新整理</button>
+                            </div>
+                        </div>
+                    );
+                }
+                return this.props.children;
+            }
+        }
 
         // --- 圖示組件 ---
         const IconBase = ({ children, className, ...props }) => (
@@ -103,7 +140,6 @@
 
         // --- 預設資料 (完整版) ---
         const DEFAULT_DATA = [
-            // 業本部
             { id: '300', unit: '業本部', ext: '300', name: '董事長', note: '' },
             { id: '301', unit: '業本部', ext: '301', name: '邱靜怡', note: '' },
             { id: '302', unit: '業本部', ext: '302', name: '劉伊祐', note: '#6940' },
@@ -118,19 +154,16 @@
             { id: '350', unit: '業本部', ext: '350', name: '大會議室', note: '' },
             { id: '351', unit: '業本部', ext: '351', name: '會議室', note: '' },
             { id: '352', unit: '業本部', ext: '352', name: '會客室', note: '' },
-            // 策略企劃部
             { id: '200', unit: '策略企劃部', ext: '200', name: '王總經理', note: '' },
             { id: '202', unit: '策略企劃部', ext: '202', name: '王絮平', note: '' },
             { id: '203', unit: '策略企劃部', ext: '203', name: '唐育崧', note: '' },
             { id: '205', unit: '策略企劃部', ext: '205', name: '述職人員', note: '' },
             { id: '207', unit: '策略企劃部', ext: '207', name: '王慈苑', note: '' },
             { id: '208', unit: '策略企劃部', ext: '208', name: '韋俊斌', note: '' },
-            // 資訊室
             { id: '230', unit: '資訊室', ext: '230', name: '李炯明', note: '' },
             { id: '231', unit: '資訊室', ext: '231', name: '鄭凱勻', note: '' },
             { id: '232', unit: '資訊室', ext: '232', name: '李佳鴻', note: '' },
             { id: '233', unit: '資訊室', ext: '233', name: '資訊室機房', note: '' },
-            // 研發部
             { id: '500', unit: '研發部', ext: '500', name: '謝俊傑', note: '#6900' },
             { id: '501', unit: '研發部', ext: '501', name: '潘亭溱', note: '' },
             { id: '502', unit: '研發部', ext: '502', name: '潘淑貞', note: '' },
@@ -151,12 +184,10 @@
             { id: '572', unit: '研發部', ext: '572', name: '5F實驗室四', note: '' },
             { id: '573', unit: '研發部', ext: '573', name: '盧義雄', note: '#6915' },
             { id: '575', unit: '研發部', ext: '575', name: '5樓EI實驗室', note: '' },
-            // 資材課
             { id: '101', unit: '資材課', ext: '101', name: '楊正堂', note: '#6705' },
             { id: '102', unit: '資材課', ext: '102', name: '蔡政穎/陳明毅', note: '' },
             { id: '103', unit: '資材課', ext: '103', name: '郭鈺溱', note: '' },
             { id: '105', unit: '資材課', ext: '105', name: '程讌荀', note: '' },
-            // 生產部
             { id: '610', unit: '生產部現場', ext: '610', name: '生一課控制室', note: '' },
             { id: '611', unit: '生產部現場', ext: '611', name: '生一課採樣室', note: '' },
             { id: '620', unit: '生產部現場', ext: '620', name: '生二課控制室', note: '' },
@@ -164,9 +195,7 @@
             { id: '630', unit: '生產部現場', ext: '630', name: '生三課控制室', note: '' },
             { id: '751', unit: '生產部現場', ext: '751', name: '吳政憲/陸重志', note: '#6963/#6979' },
             { id: '752', unit: '生產部現場', ext: '752', name: '林仁揚/吳琬婷', note: '#964' },
-            // 營業部
             { id: '210', unit: '營業部-內銷', ext: '210', name: '蘇信龍', note: '#6880' },
-            // 外部與公設
             { id: '901', unit: '外部單位', ext: '#6 110', name: '永安分駐所', note: '' },
             { id: '902', unit: '外部單位', ext: '#6 119', name: '永安消防隊', note: '' },
             { id: '903', unit: '外部單位', ext: '07-6212895', name: '永安服務中心', note: '' },
@@ -174,7 +203,49 @@
             { id: '905', unit: '公共設施', ext: '695', name: '成品倉庫貨梯', note: '' },
         ];
 
-        // --- 主應用程式 ---
+        // --- 骨架屏組件 ---
+        const SkeletonCard = () => (
+            <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-3.5 flex items-center justify-between">
+                <div className="flex items-center gap-3 w-full">
+                    <div className="w-10 h-10 rounded-full skeleton shrink-0"></div>
+                    <div className="min-w-0 flex-1 space-y-2">
+                        <div className="h-4 w-24 skeleton rounded"></div>
+                        <div className="h-3 w-16 skeleton rounded"></div>
+                    </div>
+                </div>
+                <div className="h-6 w-10 skeleton rounded ml-2"></div>
+            </div>
+        );
+
+        // --- ContactModal 定義 (移到 App 之前) ---
+        const ContactModal = ({ isOpen, onClose, onSave, initialData, existingUnits = [] }) => {
+            const [formData, setFormData] = useState({ unit: '', ext: '', name: '', note: '' });
+            useEffect(() => { 
+                if (initialData) { 
+                    setFormData(initialData); 
+                } else { 
+                    setFormData({ unit: '', ext: '', name: '', note: '' }); 
+                } 
+            }, [initialData]);
+            
+            const handleSubmit = (e) => { e.preventDefault(); onSave({ ...formData, id: initialData?.id }); };
+            
+            return (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
+                        <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50"><h3 className="font-bold text-lg text-slate-800">{initialData ? '編輯聯絡人' : '新增聯絡人'}</h3><button onClick={onClose} type="button" className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button></div>
+                        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                        <div><label className="block text-sm font-medium text-slate-700 mb-1">部門 / 單位</label><div className="relative"><div className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"><Building className="w-4 h-4" /></div><input required type="text" list="units-datalist" className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" placeholder="例如：資訊室" value={formData.unit || ''} onChange={e => setFormData({...formData, unit: e.target.value})} /><datalist id="units-datalist">{existingUnits.map(u => <option key={u} value={u} />)}</datalist></div></div>
+                        <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-medium text-slate-700 mb-1">使用人姓名</label><div className="relative"><div className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"><User className="w-4 h-4" /></div><input required type="text" className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" placeholder="姓名" value={formData.name || ''} onChange={e => setFormData({...formData, name: e.target.value})} /></div></div><div><label className="block text-sm font-medium text-slate-700 mb-1">分機號碼</label><div className="relative"><div className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"><Phone className="w-4 h-4" /></div><input required type="text" className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" placeholder="例如：300" value={formData.ext || ''} onChange={e => setFormData({...formData, ext: e.target.value})} /></div></div></div>
+                        <div><label className="block text-sm font-medium text-slate-700 mb-1">備註 (選填)</label><textarea className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" rows="2" placeholder="例如：手機號碼、職務代理人..." value={formData.note || ''} onChange={e => setFormData({...formData, note: e.target.value})}></textarea></div>
+                        <div className="pt-4 flex justify-end gap-3"><button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition">取消</button><button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-md hover:shadow-lg transition flex items-center gap-2"><Save className="w-4 h-4" /> 儲存</button></div>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- 主應用程式 (App) ---
         const App = () => {
             const [contacts, setContacts] = useState([]);
             const [searchTerm, setSearchTerm] = useState('');
@@ -226,8 +297,12 @@
                     }));
                     
                     data.sort((a, b) => {
-                        if (a.unit !== b.unit) return a.unit.localeCompare(b.unit, 'zh-TW');
-                        return a.ext.localeCompare(b.ext);
+                        const unitA = a.unit || '';
+                        const unitB = b.unit || '';
+                        if (unitA !== unitB) return unitA.localeCompare(unitB, 'zh-TW');
+                        const extA = a.ext || '';
+                        const extB = b.ext || '';
+                        return extA.localeCompare(extB);
                     });
 
                     setContacts(data);
@@ -244,7 +319,7 @@
             }, [user]);
 
             const allUnits = useMemo(() => {
-                const units = [...new Set(contacts.map(c => c.unit).filter(u => u && u.trim() !== ''))];
+                const units = [...new Set(contacts.map(c => c.unit || '').filter(u => u && u.trim() !== ''))];
                 return units.sort();
             }, [contacts]);
 
@@ -262,19 +337,32 @@
                         for (let i = 0; i < row.length; i += 4) {
                             const unit = row[i]?.trim(); let ext = row[i+1]?.trim(); const nameRaw = row[i+2]?.trim();
                             if (unit && ext && nameRaw && unit !== '單位' && ext !== '分機') {
-                                ext = ext.replace('.0', ''); newContacts.push({ unit: unit, ext: ext, name: nameRaw, note: '' });
+                                ext = ext.replace('.0', ''); 
+                                newContacts.push({ 
+                                    unit: unit || '', 
+                                    ext: ext || '', 
+                                    name: nameRaw || '', 
+                                    note: '' 
+                                });
                             }
                         }
                     } else {
                         const col0 = row[0]; const col1 = row[1]; let name = col1; let ext = row[2]; let note = row[3];
                         if (col1 && !isNaN(col1) && isNaN(row[2])) { ext = col1; name = row[2]; } else if (col1 && col1.includes('分機')) { return; }
-                        if (col0 && name && ext) { if (['部門', '單位', 'Unit'].includes(col0) || ['分機'].includes(ext)) return; newContacts.push({ unit: col0, name: name, ext: ext.replace('.0', ''), note: note || '' }); }
+                        if (col0 && name && ext) { 
+                            if (['部門', '單位', 'Unit'].includes(col0) || ['分機'].includes(ext)) return; 
+                            newContacts.push({ 
+                                unit: col0 || '', 
+                                name: name || '', 
+                                ext: ext.replace('.0', '') || '', 
+                                note: note || '' 
+                            }); 
+                        }
                     }
                 });
                 return { contacts: newContacts, mode };
             };
 
-            // 批次上傳資料到 Firebase (智慧更新模式)
             const batchUploadToFirebase = async (dataToUpload) => {
                 if (!user) {
                     alert("尚未連線到資料庫，請稍後再試");
@@ -289,8 +377,6 @@
                     let updatedCount = 0;
                     const BATCH_SIZE = 450; 
 
-                    // 1. 建立現有資料的「指紋對照表」
-                    // Key: 姓名+分機 (Cleaned) -> Value: Document ID
                     const existingMap = new Map();
                     contacts.forEach(c => {
                         const key = `${c.name}-${c.ext}`.replace(/\s/g, '').toLowerCase();
@@ -298,30 +384,24 @@
                     });
 
                     for (const contact of dataToUpload) {
-                        // 2. 產生待上傳資料的指紋
                         const key = `${contact.name}-${contact.ext}`.replace(/\s/g, '').toLowerCase();
-                        const { id, ...data } = contact; // 移除暫時的 id
+                        const { id, ...data } = contact; 
 
                         if (existingMap.has(key)) {
-                            // 3. 已存在 -> 更新 (Update)
                             const docId = existingMap.get(key);
                             const ref = db.collection(COLLECTION_NAME).doc(docId);
-                            batch.update(ref, data); // 只更新欄位
+                            batch.update(ref, data);
                             updatedCount++;
                         } else {
-                            // 4. 不存在 -> 新增 (Insert)
                             const newRef = db.collection(COLLECTION_NAME).doc();
                             batch.set(newRef, data);
                             addedCount++;
-                            // 加入到本地對照表，防止同批次重複新增
                             existingMap.set(key, newRef.id);
                         }
                         
-                        // 簡單批次控制
                         if ((addedCount + updatedCount) >= BATCH_SIZE) break; 
                     }
 
-                    // 5. 執行
                     if ((addedCount + updatedCount) > 0) {
                         await batch.commit();
                         alert(`處理完成！\n🆕 新增資料：${addedCount} 筆\n🔄 更新資料：${updatedCount} 筆`);
@@ -337,14 +417,12 @@
                 }
             };
 
-            // 清除資料庫中的重複項 (強力版)
             const cleanDuplicates = async () => {
                 if (!user) return;
                 if (!window.confirm("確定要執行「強力去重」嗎？\n\n系統將掃描整個資料庫，若發現「姓名+分機」相同，將只保留一筆，其餘刪除。\n(會忽略部門名稱的差異)")) return;
 
                 setIsUploading(true);
                 try {
-                    // 取得所有資料
                     const snapshot = await db.collection(COLLECTION_NAME).get();
                     const allDocs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
@@ -354,20 +432,16 @@
                     const BATCH_SIZE = 450; 
 
                     for (const doc of allDocs) {
-                        // 指紋：姓名+分機 (去除空白、轉小寫、去除 .0)
                         const cleanName = String(doc.name || '').replace(/\s/g, '').toLowerCase();
                         const cleanExt = String(doc.ext || '').replace(/\.0$/, '').replace(/\s/g, '');
                         const signature = `${cleanName}-${cleanExt}`;
                         
                         if (seenSignatures.has(signature)) {
-                            // 已經看過這個指紋 -> 重複 -> 標記刪除
                             const ref = db.collection(COLLECTION_NAME).doc(doc.id);
                             batch.delete(ref);
                             deleteCount++;
-                            
                             if (deleteCount >= BATCH_SIZE) break; 
                         } else {
-                            // 沒看過 -> 加入清單 (保留第一筆)
                             seenSignatures.add(signature);
                         }
                     }
@@ -387,7 +461,6 @@
                 }
             };
 
-            // 清空所有資料 (核彈級)
             const deleteAllData = async () => {
                 if (!user) return;
                 if (!window.confirm("⚠️ 警告：這將會「永久刪除」資料庫中的所有聯絡人資料！\n\n您確定要清空嗎？")) return;
@@ -442,180 +515,218 @@
                 const lowerSearch = searchTerm.toLowerCase();
                 return contacts.filter(contact => {
                     const matchesUnit = selectedUnit ? contact.unit === selectedUnit : true;
-                    const matchesSearch = contact.name.toLowerCase().includes(lowerSearch) || contact.ext.includes(lowerSearch) || contact.unit.toLowerCase().includes(lowerSearch) || (contact.note && contact.note.toLowerCase().includes(lowerSearch));
+                    const cName = contact.name || '';
+                    const cExt = contact.ext || '';
+                    const cUnit = contact.unit || '';
+                    const cNote = contact.note || '';
+                    const matchesSearch = cName.toLowerCase().includes(lowerSearch) || 
+                                          cExt.includes(lowerSearch) || 
+                                          cUnit.toLowerCase().includes(lowerSearch) || 
+                                          cNote.toLowerCase().includes(lowerSearch);
                     return matchesUnit && matchesSearch;
                 });
             }, [contacts, searchTerm, selectedUnit]);
+            
             const handleDelete = async (id) => { if (window.confirm('確定要刪除此聯絡人嗎？(此操作會同步刪除雲端資料)')) { try { await db.collection(COLLECTION_NAME).doc(id).delete(); } catch (err) { alert("刪除失敗：" + err.message); } } };
             const handleSave = async (contact) => { try { if (contact.id) { const { id, ...data } = contact; await db.collection(COLLECTION_NAME).doc(id).set(data, { merge: true }); } else { const { id, ...data } = contact; await db.collection(COLLECTION_NAME).add(data); } setIsModalOpen(false); setEditingContact(null); } catch (err) { alert("儲存失敗：" + err.message); } };
             const openAddModal = () => { setEditingContact(null); setIsModalOpen(true); };
             const openEditModal = (contact) => { setEditingContact(contact); setIsModalOpen(true); };
             const handleInitDefaultData = () => { if (window.confirm("這將會把內建的預設資料(PDF內容)全部上傳到 Firebase。\n如果資料庫已經有資料，可能會造成重複。\n確定要執行嗎？")) { batchUploadToFirebase(DEFAULT_DATA); } };
-            const exportCSV = () => { const header = "部門,姓名,分機,備註\n"; const rows = contacts.map(c => `${c.unit},${c.name},${c.ext},${c.note || ''}`).join("\n"); const blob = new Blob(["\ufeff" + header + rows], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.setAttribute('download', '公司通訊錄_雲端備份.csv'); document.body.appendChild(link); link.click(); document.body.removeChild(link); };
+            const exportCSV = () => { const header = "部門,姓名,分機,備註\n"; const rows = contacts.map(c => `${c.unit || ''},${c.name || ''},${c.ext || ''},${c.note || ''}`).join("\n"); const blob = new Blob(["\ufeff" + header + rows], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.setAttribute('download', '公司通訊錄_雲端備份.csv'); document.body.appendChild(link); link.click(); document.body.removeChild(link); };
 
             return (
                 <div className="min-h-screen bg-slate-50 font-sans text-slate-800 pb-12">
-                    <header className="bg-blue-600 text-white shadow-md sticky top-0 z-20">
-                        <div className="max-w-6xl mx-auto px-4 py-3">
-                            <div className="flex justify-between items-center mb-3">
-                                {/* Logo 區域 - 強制重新載入 icon.png */}
-                                <h1 
-                                    className="text-xl font-bold flex items-center gap-3 cursor-pointer hover:opacity-90 transition" 
-                                    onClick={() => {setSelectedUnit(null); setSearchTerm('')}}
-                                >
-                                    {!imageError ? (
-                                        <img 
-                                            src="icon.png?v=3" 
-                                            alt="Logo" 
-                                            className="w-8 h-8 object-contain rounded-lg bg-white/10 p-0.5" 
-                                            onError={() => {
-                                                setImageError(true);
-                                            }}
-                                        />
-                                    ) : (
-                                        <Phone className="w-6 h-6" />
-                                    )}
-                                    <span>公司分機表</span>
-                                </h1>
-                                
-                                <div className="flex items-center gap-2">
-                                    {isLoading && <div className="loader mr-2"></div>}
-                                    <button 
-                                        onClick={() => setIsManageMode(!isManageMode)}
-                                        className={`p-2 rounded-lg transition text-blue-100 hover:bg-blue-500 hover:text-white ${isManageMode ? 'bg-blue-700 text-white' : ''}`}
-                                        title="管理資料"
+                    <ErrorBoundary>
+                        <header className="bg-blue-600 text-white shadow-md sticky top-0 z-20">
+                            <div className="max-w-6xl mx-auto px-4 py-3">
+                                <div className="flex justify-between items-center mb-3">
+                                    {/* Logo 區域 - 強制重新載入 icon.png */}
+                                    <h1 
+                                        className="text-xl font-bold flex items-center gap-3 cursor-pointer hover:opacity-90 transition" 
+                                        onClick={() => {setSelectedUnit(null); setSearchTerm('')}}
                                     >
-                                        {isManageMode ? <ChevronUp className="w-5 h-5" /> : <Settings className="w-5 h-5" />}
-                                    </button>
+                                        {!imageError ? (
+                                            <img 
+                                                src="icon.png?v=3" 
+                                                alt="Logo" 
+                                                className="w-8 h-8 object-contain rounded-lg bg-white/10 p-0.5" 
+                                                onError={() => {
+                                                    setImageError(true);
+                                                }}
+                                            />
+                                        ) : (
+                                            <Phone className="w-6 h-6" />
+                                        )}
+                                        <span>公司分機表</span>
+                                    </h1>
+                                    
+                                    <div className="flex items-center gap-2">
+                                        {isLoading && <div className="loader mr-2"></div>}
+                                        <button 
+                                            onClick={() => setIsManageMode(!isManageMode)}
+                                            className={`p-2 rounded-lg transition text-blue-100 hover:bg-blue-500 hover:text-white ${isManageMode ? 'bg-blue-700 text-white' : ''}`}
+                                            title="管理資料"
+                                        >
+                                            {isManageMode ? <ChevronUp className="w-5 h-5" /> : <Settings className="w-5 h-5" />}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="relative w-full">
+                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                        <Search className="h-4 w-4 text-blue-200" />
+                                    </div>
+                                    <input
+                                        type="text"
+                                        className="block w-full pl-9 pr-8 py-2.5 border-none rounded-lg leading-5 bg-blue-700/50 text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-white focus:bg-blue-600 sm:text-sm transition duration-150 ease-in-out"
+                                        placeholder="搜尋姓名、分機或部門..."
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                    />
+                                    {searchTerm && (
+                                        <button 
+                                            onClick={() => setSearchTerm('')}
+                                            className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-blue-300 hover:text-white"
+                                        >
+                                            <X className="w-4 h-4" />
+                                        </button>
+                                    )}
                                 </div>
                             </div>
+                        </header>
 
-                            <div className="relative w-full">
-                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                    <Search className="h-4 w-4 text-blue-200" />
-                                </div>
-                                <input
-                                    type="text"
-                                    className="block w-full pl-9 pr-8 py-2.5 border-none rounded-lg leading-5 bg-blue-700/50 text-white placeholder-blue-200 focus:outline-none focus:ring-2 focus:ring-white focus:bg-blue-600 sm:text-sm transition duration-150 ease-in-out"
-                                    placeholder="搜尋姓名、分機或部門..."
-                                    value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                />
-                                {searchTerm && (
-                                    <button 
-                                        onClick={() => setSearchTerm('')}
-                                        className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-blue-300 hover:text-white"
-                                    >
-                                        <X className="w-4 h-4" />
+                        {/* 管理面板與列表區域 (保持不變) */}
+                        <div className={`bg-white border-b border-slate-200 overflow-hidden transition-all duration-300 ease-in-out ${isManageMode ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}`}>
+                            <div className="max-w-6xl mx-auto px-4 py-4 space-y-4">
+                                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                                    <Settings className="w-4 h-4" /> 資料管理 (Firebase 雲端版)
+                                </h3>
+                                <div className="text-xs text-slate-400 mb-2">Version: {APP_VERSION}</div>
+
+                                <div className="flex flex-wrap gap-3 items-center">
+                                    <button onClick={openAddModal} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm transition shadow-sm"><Plus className="w-4 h-4" /> 新增</button>
+                                    <div className="h-6 w-px bg-slate-300 mx-1 hidden sm:block"></div>
+                                    <label className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-slate-600 text-sm transition shadow-sm">
+                                        {isUploading ? <div className="loader w-4 h-4 border-slate-400"></div> : <Upload className="w-4 h-4" />}
+                                        <span>{isUploading ? "上傳中..." : "匯入 CSV"}</span>
+                                        <input key={encoding} type="file" accept=".csv,.txt" className="hidden" onChange={handleFileUpload} disabled={isUploading} />
+                                    </label>
+                                    <div className="flex items-center bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 shadow-sm">
+                                        <span className="text-xs text-slate-500 mr-2">CSV編碼:</span>
+                                        <select value={encoding} onChange={(e) => setEncoding(e.target.value)} className="text-sm bg-transparent border-none focus:ring-0 text-slate-700 cursor-pointer outline-none p-0"><option value="big5">Big5 (Excel)</option><option value="utf-8">UTF-8</option></select>
+                                    </div>
+                                    <button onClick={exportCSV} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-600 text-sm transition shadow-sm"><Download className="w-4 h-4" /> 匯出</button>
+                                    <div className="h-6 w-px bg-slate-300 mx-1 hidden sm:block"></div>
+                                    
+                                    {/* 新增：清除重複資料按鈕 */}
+                                    <button onClick={cleanDuplicates} className="flex items-center gap-2 px-4 py-2 bg-orange-50 text-orange-700 border border-orange-200 rounded-lg hover:bg-orange-100 text-sm transition shadow-sm" disabled={isUploading} title="清除資料庫中已存在的重複資料">
+                                        <Broom className="w-4 h-4" />
+                                        強力清除重複
                                     </button>
+
+                                    {/* 新增：清空資料按鈕 */}
+                                    <button onClick={deleteAllData} className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100 text-sm transition shadow-sm" disabled={isUploading} title="刪除所有資料，慎用！">
+                                        <Trash className="w-4 h-4" />
+                                        清空所有資料
+                                    </button>
+
+                                    <button onClick={handleInitDefaultData} className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100 text-sm transition shadow-sm" disabled={isUploading}><CloudUpload className="w-4 h-4" /> 上傳預設資料</button>
+                                    <button onClick={() => setShowFormatHint(!showFormatHint)} className="p-2 text-slate-400 hover:text-blue-600 transition ml-auto"><HelpCircle className="w-5 h-5" /></button>
+                                </div>
+                                {showFormatHint && (
+                                    <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-slate-700 animate-in fade-in slide-in-from-top-2">
+                                        <p className="mb-2 font-bold text-blue-800">💡 建議 CSV 欄位順序 (4欄):</p>
+                                        <p className="text-xs text-slate-600">A:部門 | B:姓名 | C:分機 | D:備註</p>
+                                    </div>
                                 )}
                             </div>
                         </div>
-                    </header>
 
-                    {/* 管理面板與列表區域 (保持不變) */}
-                    <div className={`bg-white border-b border-slate-200 overflow-hidden transition-all duration-300 ease-in-out ${isManageMode ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}`}>
-                        <div className="max-w-6xl mx-auto px-4 py-4 space-y-4">
-                            <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-                                <Settings className="w-4 h-4" /> 資料管理 (Firebase 雲端版)
-                            </h3>
-                            <div className="text-xs text-slate-400 mb-2">Version: {APP_VERSION}</div>
-
-                            <div className="flex flex-wrap gap-3 items-center">
-                                <button onClick={openAddModal} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm transition shadow-sm"><Plus className="w-4 h-4" /> 新增</button>
-                                <div className="h-6 w-px bg-slate-300 mx-1 hidden sm:block"></div>
-                                <label className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-slate-600 text-sm transition shadow-sm">
-                                    {isUploading ? <div className="loader w-4 h-4 border-slate-400"></div> : <Upload className="w-4 h-4" />}
-                                    <span>{isUploading ? "上傳中..." : "匯入 CSV"}</span>
-                                    <input key={encoding} type="file" accept=".csv,.txt" className="hidden" onChange={handleFileUpload} disabled={isUploading} />
-                                </label>
-                                <div className="flex items-center bg-slate-50 border border-slate-300 rounded-lg px-2 py-1.5 shadow-sm">
-                                    <span className="text-xs text-slate-500 mr-2">CSV編碼:</span>
-                                    <select value={encoding} onChange={(e) => setEncoding(e.target.value)} className="text-sm bg-transparent border-none focus:ring-0 text-slate-700 cursor-pointer outline-none p-0"><option value="big5">Big5 (Excel)</option><option value="utf-8">UTF-8</option></select>
+                        <main className="max-w-6xl mx-auto px-4 pt-4">
+                            {isLoading ? (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                    {Array(9).fill(0).map((_, i) => <SkeletonCard key={i} />)}
                                 </div>
-                                <button onClick={exportCSV} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-600 text-sm transition shadow-sm"><Download className="w-4 h-4" /> 匯出</button>
-                                <div className="h-6 w-px bg-slate-300 mx-1 hidden sm:block"></div>
-                                
-                                {/* 新增：清除重複資料按鈕 */}
-                                <button onClick={cleanDuplicates} className="flex items-center gap-2 px-4 py-2 bg-orange-50 text-orange-700 border border-orange-200 rounded-lg hover:bg-orange-100 text-sm transition shadow-sm" disabled={isUploading} title="清除資料庫中已存在的重複資料">
-                                    <Broom className="w-4 h-4" />
-                                    強力清除重複
-                                </button>
+                            ) : (
+                                <>
+                                    {contacts.length === 0 ? (
+                                        <div className="text-center py-12 bg-white rounded-lg border border-dashed border-slate-300 fade-in">
+                                            <p className="text-slate-500 mb-4">資料庫目前是空的</p>
+                                            <button onClick={handleInitDefaultData} className="text-blue-600 hover:underline font-bold">點此上傳預設資料 (PDF內容)</button>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            {/* 部門篩選 (方格版) */}
+                                            {allUnits.length > 0 && (
+                                                <div className="mb-6 fade-in">
+                                                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                                                        <button 
+                                                            onClick={() => setSelectedUnit(null)} 
+                                                            className={`px-2 py-3 rounded-lg text-sm font-medium transition-colors border text-center ${!selectedUnit ? 'bg-slate-800 text-white border-slate-800 shadow-sm scale-[1.02]' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}
+                                                        >
+                                                            全部
+                                                        </button>
+                                                        {allUnits.map(unit => {
+                                                            const isSelected = selectedUnit === unit;
+                                                            return ( 
+                                                                <button 
+                                                                    key={unit} 
+                                                                    onClick={() => setSelectedUnit(unit)} 
+                                                                    className={`px-2 py-3 rounded-lg text-sm font-medium transition-colors border text-center truncate ${isSelected ? 'bg-blue-600 text-white border-blue-600 shadow-sm scale-[1.02]' : 'bg-white text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200'}`} 
+                                                                    title={unit}
+                                                                >
+                                                                    {unit}
+                                                                </button> 
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
 
-                                {/* 新增：清空資料按鈕 */}
-                                <button onClick={deleteAllData} className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100 text-sm transition shadow-sm" disabled={isUploading} title="刪除所有資料，慎用！">
-                                    <Trash className="w-4 h-4" />
-                                    清空所有資料
-                                </button>
+                                            {/* 篩選結果狀態 */}
+                                            {(selectedUnit || searchTerm) && (
+                                                <div className="flex items-center justify-between mb-4 text-sm text-slate-500 px-1 fade-in">
+                                                    <div className="flex items-center gap-2">
+                                                        <span>{selectedUnit && `📂 ${selectedUnit}`}{selectedUnit && searchTerm && ' + '}{searchTerm && `🔍 "${searchTerm}"`}</span>
+                                                        <span className="text-xs bg-slate-100 px-2 py-0.5 rounded-full">{filteredContacts.length} 筆</span>
+                                                    </div>
+                                                    <button onClick={() => {setSelectedUnit(null); setSearchTerm('');}} className="text-xs text-blue-500 hover:underline flex items-center gap-1"><RotateCcw className="w-3 h-3" /> 清除</button>
+                                                </div>
+                                            )}
 
-                                <button onClick={handleInitDefaultData} className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100 text-sm transition shadow-sm" disabled={isUploading}><CloudUpload className="w-4 h-4" /> 上傳預設資料</button>
-                                <button onClick={() => setShowFormatHint(!showFormatHint)} className="p-2 text-slate-400 hover:text-blue-600 transition ml-auto"><HelpCircle className="w-5 h-5" /></button>
-                            </div>
-                            {showFormatHint && (
-                                <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-slate-700 animate-in fade-in slide-in-from-top-2">
-                                    <p className="mb-2 font-bold text-blue-800">💡 建議 CSV 欄位順序 (4欄):</p>
-                                    <p className="text-xs text-slate-600">A:部門 | B:姓名 | C:分機 | D:備註</p>
-                                </div>
+                                            {/* 聯絡人卡片列表 */}
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 fade-in">
+                                                {filteredContacts.length > 0 ? (
+                                                    filteredContacts.map((contact) => (
+                                                        <div key={contact.id} className="bg-white rounded-lg shadow-sm border border-slate-200 p-3.5 flex items-center justify-between hover:shadow-md transition duration-200 group relative">
+                                                            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-white/90 backdrop-blur-sm rounded-lg p-1 shadow-sm border border-slate-100">
+                                                                <button onClick={() => openEditModal(contact)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="編輯"><Edit2 className="w-3.5 h-3.5" /></button>
+                                                                <button onClick={() => handleDelete(contact.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="刪除"><Trash2 className="w-3.5 h-3.5" /></button>
+                                                            </div>
+                                                            <div className="flex items-center gap-3 overflow-hidden">
+                                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold shrink-0 text-white text-sm shadow-sm ${selectedUnit === contact.unit ? 'bg-blue-500' : 'bg-slate-400'}`}>{(contact.name || '?').charAt(0)}</div>
+                                                                <div className="min-w-0">
+                                                                    <h3 className="font-bold text-slate-800 truncate">{contact.name || '未命名'}</h3>
+                                                                    <div className="text-xs text-slate-500 truncate flex items-center gap-1">{contact.unit || ''}{contact.note && <span className="text-slate-300">|</span>}{contact.note && <span className="text-orange-400">{contact.note}</span>}</div>
+                                                                </div>
+                                                            </div>
+                                                            <div className="pl-2 text-right">
+                                                                <a href={`tel:${(contact.ext || '').split('#')[0]}`} className="block text-xl font-bold text-blue-600 font-mono hover:underline decoration-2 underline-offset-2">{contact.ext || ''}</a>
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                ) : (
+                                                    <div className="col-span-full py-10 text-center text-slate-400"><p>查無資料</p></div>
+                                                )}
+                                            </div>
+                                        </>
+                                    )}
+                                </>
                             )}
-                        </div>
-                    </div>
+                        </main>
 
-                    <main className="max-w-6xl mx-auto px-4 pt-4">
-                        {isLoading && contacts.length === 0 && (
-                            <div className="flex flex-col items-center justify-center py-12">
-                                <div className="loader w-10 h-10 border-blue-500 mb-4"></div>
-                                <p className="text-slate-500 text-sm">正在連線至雲端資料庫...</p>
-                            </div>
-                        )}
-                        {!isLoading && contacts.length === 0 && (
-                            <div className="text-center py-12 bg-white rounded-lg border border-dashed border-slate-300">
-                                <p className="text-slate-500 mb-4">資料庫目前是空的</p>
-                                <button onClick={handleInitDefaultData} className="text-blue-600 hover:underline font-bold">點此上傳預設資料 (PDF內容)</button>
-                            </div>
-                        )}
-                        {allUnits.length > 0 && (
-                        <div className="mb-6">
-                            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-                            <button onClick={() => setSelectedUnit(null)} className={`px-2 py-3 rounded-lg text-sm font-medium transition-colors border text-center ${!selectedUnit ? 'bg-slate-800 text-white border-slate-800 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}`}>全部</button>
-                            {allUnits.map(unit => {
-                                const isSelected = selectedUnit === unit;
-                                return ( <button key={unit} onClick={() => setSelectedUnit(unit)} className={`px-2 py-3 rounded-lg text-sm font-medium transition-colors border text-center truncate ${isSelected ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200'}`} title={unit}>{unit}</button> );
-                            })}
-                            </div>
-                        </div>
-                        )}
-                        {(selectedUnit || searchTerm) && (
-                        <div className="flex items-center justify-between mb-4 text-sm text-slate-500 px-1">
-                            <div className="flex items-center gap-2">
-                            <span>{selectedUnit && `📂 ${selectedUnit}`}{selectedUnit && searchTerm && ' + '}{searchTerm && `🔍 "${searchTerm}"`}</span>
-                            <span className="text-xs bg-slate-100 px-2 py-0.5 rounded-full">{filteredContacts.length} 筆</span>
-                            </div>
-                            <button onClick={() => {setSelectedUnit(null); setSearchTerm('');}} className="text-xs text-blue-500 hover:underline flex items-center gap-1"><RotateCcw className="w-3 h-3" /> 清除</button>
-                        </div>
-                        )}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {filteredContacts.length > 0 ? (
-                            filteredContacts.map((contact) => (
-                            <div key={contact.id} className="bg-white rounded-lg shadow-sm border border-slate-200 p-3.5 flex items-center justify-between hover:shadow-md transition duration-200 group relative">
-                                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-white/90 backdrop-blur-sm rounded-lg p-1 shadow-sm border border-slate-100">
-                                    <button onClick={() => openEditModal(contact)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="編輯"><Edit2 className="w-3.5 h-3.5" /></button>
-                                    <button onClick={() => handleDelete(contact.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors" title="刪除"><Trash2 className="w-3.5 h-3.5" /></button>
-                                </div>
-                                <div className="flex items-center gap-3 overflow-hidden">
-                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold shrink-0 text-white text-sm shadow-sm ${selectedUnit === contact.unit ? 'bg-blue-500' : 'bg-slate-400'}`}>{contact.name.charAt(0)}</div>
-                                    <div className="min-w-0">
-                                    <h3 className="font-bold text-slate-800 truncate">{contact.name}</h3>
-                                    <div className="text-xs text-slate-500 truncate flex items-center gap-1">{contact.unit}{contact.note && <span className="text-slate-300">|</span>}{contact.note && <span className="text-orange-400">{contact.note}</span>}</div>
-                                    </div>
-                                </div>
-                                <div className="pl-2 text-right"><a href={`tel:${contact.ext.split('#')[0]}`} className="block text-xl font-bold text-blue-600 font-mono hover:underline decoration-2 underline-offset-2">{contact.ext}</a></div>
-                            </div>
-                            ))
-                        ) : ( !isLoading && <div className="col-span-full py-10 text-center text-slate-400"><p>查無資料</p></div> )}
-                        </div>
-                    </main>
-
-                    {isModalOpen && <ContactModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSave} initialData={editingContact} existingUnits={allUnits} />}
+                        {isModalOpen && <ContactModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSave} initialData={editingContact} existingUnits={allUnits} />}
+                    </ErrorBoundary>
                 </div>
             );
         };
