@@ -13,8 +13,8 @@
     <title>公司分機表</title>
     
     <!-- 設定 App 圖示 -->
-    <link rel="icon" href="icon.png?v=2" type="image/png" />
-    <link rel="apple-touch-icon" href="icon.png?v=2" />
+    <link rel="icon" href="icon.png?v=3" type="image/png" />
+    <link rel="apple-touch-icon" href="icon.png?v=3" />
     
     <!-- 1. 載入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -56,7 +56,7 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
-        const APP_VERSION = "v1.9 (Smart Clean & Reset)";
+        const APP_VERSION = "v2.0 (Smart Update)";
 
         // --- Firebase 設定 ---
         const firebaseConfig = {
@@ -274,7 +274,7 @@
                 return { contacts: newContacts, mode };
             };
 
-            // 批次上傳資料到 Firebase
+            // 批次上傳資料到 Firebase (智慧更新模式)
             const batchUploadToFirebase = async (dataToUpload) => {
                 if (!user) {
                     alert("尚未連線到資料庫，請稍後再試");
@@ -286,42 +286,47 @@
                 try {
                     const batch = db.batch();
                     let addedCount = 0;
-                    let skippedCount = 0;
+                    let updatedCount = 0;
                     const BATCH_SIZE = 450; 
 
-                    // 1. 建立現有資料的「指紋」清單 (寬鬆比對：姓名 + 分機，去除空白與大小寫)
-                    const existingSignatures = new Set(
-                        contacts.map(c => `${c.name}-${c.ext}`.replace(/\s/g, '').toLowerCase())
-                    );
+                    // 1. 建立現有資料的「指紋對照表」
+                    // Key: 姓名+分機 (Cleaned) -> Value: Document ID
+                    const existingMap = new Map();
+                    contacts.forEach(c => {
+                        const key = `${c.name}-${c.ext}`.replace(/\s/g, '').toLowerCase();
+                        existingMap.set(key, c.id);
+                    });
 
                     for (const contact of dataToUpload) {
                         // 2. 產生待上傳資料的指紋
-                        const signature = `${contact.name}-${contact.ext}`.replace(/\s/g, '').toLowerCase();
-                        
-                        // 3. 檢查是否重複
-                        if (existingSignatures.has(signature)) {
-                            skippedCount++;
-                            continue; // 跳過此筆
+                        const key = `${contact.name}-${contact.ext}`.replace(/\s/g, '').toLowerCase();
+                        const { id, ...data } = contact; // 移除暫時的 id
+
+                        if (existingMap.has(key)) {
+                            // 3. 已存在 -> 更新 (Update)
+                            const docId = existingMap.get(key);
+                            const ref = db.collection(COLLECTION_NAME).doc(docId);
+                            batch.update(ref, data); // 只更新欄位
+                            updatedCount++;
+                        } else {
+                            // 4. 不存在 -> 新增 (Insert)
+                            const newRef = db.collection(COLLECTION_NAME).doc();
+                            batch.set(newRef, data);
+                            addedCount++;
+                            // 加入到本地對照表，防止同批次重複新增
+                            existingMap.set(key, newRef.id);
                         }
-
-                        // 4. 若無重複則加入寫入排程
-                        const newRef = db.collection(COLLECTION_NAME).doc();
-                        const { id, ...data } = contact; 
-                        batch.set(newRef, data);
-                        addedCount++;
                         
-                        // 更新本地指紋庫，防止同一次匯入中的重複
-                        existingSignatures.add(signature);
-
-                        if (addedCount >= BATCH_SIZE) break; 
+                        // 簡單批次控制
+                        if ((addedCount + updatedCount) >= BATCH_SIZE) break; 
                     }
 
-                    // 5. 執行寫入
-                    if (addedCount > 0) {
+                    // 5. 執行
+                    if ((addedCount + updatedCount) > 0) {
                         await batch.commit();
-                        alert(`處理完成！\n✅ 成功新增：${addedCount} 筆\n⚠️ 自動略過：${skippedCount} 筆重複資料`);
+                        alert(`處理完成！\n🆕 新增資料：${addedCount} 筆\n🔄 更新資料：${updatedCount} 筆`);
                     } else {
-                        alert(`未新增任何資料。\n(所有 ${skippedCount} 筆資料皆已存在於資料庫中)`);
+                        alert(`未進行任何變更 (資料完全一致)`);
                     }
                     
                 } catch (error) {
@@ -386,7 +391,6 @@
             const deleteAllData = async () => {
                 if (!user) return;
                 if (!window.confirm("⚠️ 警告：這將會「永久刪除」資料庫中的所有聯絡人資料！\n\n您確定要清空嗎？")) return;
-                // 二次確認
                 const confirm2 = prompt("請輸入 'DELETE' (大寫) 以確認刪除所有資料：");
                 if (confirm2 !== 'DELETE') return;
 
@@ -430,7 +434,7 @@
                     const { contacts: newContacts, mode } = parseCSV(text);
                     if (newContacts.length > 0) {
                         const msg = mode === 'legacy' ? `偵測到「舊版排版格式」，解析出 ${newContacts.length} 筆資料。` : `偵測到「標準清單格式」，解析出 ${newContacts.length} 筆資料。`;
-                        if (window.confirm(`${msg}\n確定要將這些資料「新增」到雲端資料庫嗎？`)) { batchUploadToFirebase(newContacts); } setSelectedUnit(null);
+                        if (window.confirm(`${msg}\n確定要將這些資料「合併更新」到雲端資料庫嗎？\n(相同姓名+分機的資料將會被更新)`)) { batchUploadToFirebase(newContacts); } setSelectedUnit(null);
                     } else { alert('解析失敗。請確認檔案編碼是否正確，或檔案內容是否符合格式。'); }
                 };
             };
@@ -461,7 +465,7 @@
                                 >
                                     {!imageError ? (
                                         <img 
-                                            src="icon.png?v=2" 
+                                            src="icon.png?v=3" 
                                             alt="Logo" 
                                             className="w-8 h-8 object-contain rounded-lg bg-white/10 p-0.5" 
                                             onError={() => {
@@ -612,25 +616,6 @@
                     </main>
 
                     {isModalOpen && <ContactModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={handleSave} initialData={editingContact} existingUnits={allUnits} />}
-                </div>
-            );
-        };
-
-        const ContactModal = ({ isOpen, onClose, onSave, initialData, existingUnits = [] }) => {
-            const [formData, setFormData] = useState({ unit: '', ext: '', name: '', note: '' });
-            useEffect(() => { if (initialData) { setFormData(initialData); } else { setFormData({ unit: '', ext: '', name: '', note: '' }); } }, [initialData]);
-            const handleSubmit = (e) => { e.preventDefault(); onSave({ ...formData, id: initialData?.id }); };
-            return (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
-                        <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50"><h3 className="font-bold text-lg text-slate-800">{initialData ? '編輯聯絡人' : '新增聯絡人'}</h3><button onClick={onClose} type="button" className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button></div>
-                        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                        <div><label className="block text-sm font-medium text-slate-700 mb-1">部門 / 單位</label><div className="relative"><div className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"><Building className="w-4 h-4" /></div><input required type="text" list="units-datalist" className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" placeholder="例如：資訊室" value={formData.unit} onChange={e => setFormData({...formData, unit: e.target.value})} /><datalist id="units-datalist">{existingUnits.map(u => <option key={u} value={u} />)}</datalist></div></div>
-                        <div className="grid grid-cols-2 gap-4"><div><label className="block text-sm font-medium text-slate-700 mb-1">使用人姓名</label><div className="relative"><div className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"><User className="w-4 h-4" /></div><input required type="text" className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" placeholder="姓名" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div></div><div><label className="block text-sm font-medium text-slate-700 mb-1">分機號碼</label><div className="relative"><div className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"><Phone className="w-4 h-4" /></div><input required type="text" className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" placeholder="例如：300" value={formData.ext} onChange={e => setFormData({...formData, ext: e.target.value})} /></div></div></div>
-                        <div><label className="block text-sm font-medium text-slate-700 mb-1">備註 (選填)</label><textarea className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition" rows="2" placeholder="例如：手機號碼、職務代理人..." value={formData.note} onChange={e => setFormData({...formData, note: e.target.value})}></textarea></div>
-                        <div className="pt-4 flex justify-end gap-3"><button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition">取消</button><button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-md hover:shadow-lg transition flex items-center gap-2"><Save className="w-4 h-4" /> 儲存</button></div>
-                        </form>
-                    </div>
                 </div>
             );
         };
