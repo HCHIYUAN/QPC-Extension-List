@@ -2,7 +2,8 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- 加入 viewport-fit=cover 以適配 iPhone 瀏海全螢幕 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="description" content="公司分機通訊錄查詢系統">
     
     <!-- === 強制清除快取設定 === -->
@@ -10,10 +11,14 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     
-    <!-- PWA 設定 -->
+    <!-- === PWA 與 原生 App 設定 (關鍵) === -->
     <link rel="manifest" href="manifest.json" />
     <meta name="theme-color" content="#2563eb" />
-    <meta name="mobile-web-app-capable" content="yes">
+    
+    <!-- iOS 專用設定 -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="format-detection" content="telephone=no">
     
     <title>公司分機表</title>
     
@@ -37,11 +42,38 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
     <style>
+        /* 隱藏滾動條 */
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-        body { background-color: #f8fafc; -webkit-tap-highlight-color: transparent; }
         
-        /* 骨架屏流光動畫 */
+        /* === App 質感核心 CSS === */
+        body { 
+            background-color: #f8fafc; 
+            /* 移除點擊高亮 */
+            -webkit-tap-highlight-color: transparent; 
+            /* 禁止下拉重新整理/回彈效果 */
+            overscroll-behavior-y: none;
+            /* 禁止選取文字 (像原生App一樣) */
+            user-select: none;
+            -webkit-user-select: none;
+            /* 禁止長按跳出選單 */
+            -webkit-touch-callout: none;
+            /* 使用系統字體 */
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            /* 確保填滿畫面 */
+            min-height: 100vh;
+            /* 適配 iPhone 安全區域 */
+            padding-top: env(safe-area-inset-top);
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        /* 恢復輸入框的文字選取功能 */
+        input, textarea {
+            user-select: text;
+            -webkit-user-select: text;
+        }
+
+        /* 骨架屏動畫 */
         @keyframes shimmer {
             0% { background-position: -1000px 0; }
             100% { background-position: 1000px 0; }
@@ -52,7 +84,6 @@
             background-size: 1000px 100%;
         }
         
-        /* 淡入動畫 */
         .fade-in {
             animation: fadeIn 0.5s ease-in-out;
         }
@@ -69,7 +100,7 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
-        const APP_VERSION = "v2.3 (Final Stable)";
+        const APP_VERSION = "v2.4 (Native Feel)";
 
         // --- Firebase 設定 ---
         const firebaseConfig = {
